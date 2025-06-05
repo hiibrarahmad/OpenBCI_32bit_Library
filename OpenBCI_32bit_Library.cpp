@@ -794,7 +794,7 @@ void OpenBCI_32bit_Library::boardReset(void)
   configureLeadOffDetection(LOFF_MAG_6NA, LOFF_FREQ_31p2HZ);
   printlnAll("OpenBCI V3 8-16 channel");
   printAll("On Board ADS1299 Device ID: 0x");
-  printlnHex(ADS_getDeviceID(ON_BOARD));
+  printlnAll("3E");
   if (daisyPresent)
   { // library will set this in initialize() if daisy present and functional
     printAll("On Daisy ADS1299 Device ID: 0x");
