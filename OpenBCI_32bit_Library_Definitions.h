@@ -32,8 +32,8 @@
 #define OPENBCI_PIN_PGC 12
 // #define WIFI_RESET 18
 
-#define OPENBCI_PIN_SERIAL1_TX 6
-#define OPENBCI_PIN_SERIAL1_RX 7
+#define OPENBCI_PIN_SERIAL1_TX D6
+#define OPENBCI_PIN_SERIAL1_RX D7
 
 //ADS1299 SPI Command Definition Byte Assignments
 #define _WAKEUP 0x02 // Wake-up from standby mode

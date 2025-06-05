@@ -1,6 +1,6 @@
 
 #include "OpenBCI_32bit_Library.h"
-
+#include <ctype.h>  // for toupper()
 /***************************************************/
 /** PUBLIC METHODS *********************************/
 /***************************************************/
@@ -4140,13 +4140,17 @@ void OpenBCI_32bit_Library::printRegisterName(byte _address)
 // Used for printing HEX in verbosity feedback mode
 void OpenBCI_32bit_Library::printHex(byte _data)
 {
-  if (_data < 0x10)
-    printAll("0");
+  // If value is < 0x10, print a leading zero
+  if (_data < 0x10) printAll("0");
+
   char buf[4];
-  // Serial.print(_data);
-  printAll(itoa(_data, buf, HEX));
-  if (commandFromSPI)
-    delay(1);
+  itoa(_data, buf, 16);            // convert to base-16 string (lowercase by default)
+  for (int i = 0; buf[i] != '\0'; i++){
+    buf[i] = toupper(buf[i]);      // force each hex digit to uppercase
+  }
+  printAll(buf);
+
+  if (commandFromSPI) delay(1);
 }
 
 void OpenBCI_32bit_Library::printlnHex(byte _data)
