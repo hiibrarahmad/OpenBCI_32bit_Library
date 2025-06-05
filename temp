@@ -1,0 +1,134 @@
+/*
+  OpenBCI_32bit_Library.h - OpenBCI 32bit library adapted for Seeeduino nRF52840
+  Uses DSPI for SPI communications and maps Serial0 -> Serial (USB CDC)
+*/
+#ifndef _____OpenBCI_32bit__
+#define _____OpenBCI_32bit__
+
+// Stub out ISR attribute if not provided
+#ifndef __USER_ISR
+  #define __USER_ISR
+#endif
+
+#include <Arduino.h>
+#include <DSPI.h>
+#include <OpenBCI_Wifi_Master.h>
+#include <OpenBCI_Wifi_Master_Definitions.h>
+#include "OpenBCI_32bit_Library_Definitions.h"
+
+// Map Serial0 to USB CDC Serial on mbed core
+#define Serial0 Serial
+
+// Forward declaration for data-ready ISR
+void __USER_ISR ADS_DRDY_Service(void);
+
+class OpenBCI_32bit_Library {
+public:
+  // ENUMS
+  typedef enum ACCEL_MODE       { ACCEL_MODE_ON, ACCEL_MODE_OFF } ACCEL_MODE;
+  typedef enum TIME_SYNC_MODE   { TIME_SYNC_MODE_ON, TIME_SYNC_MODE_OFF } TIME_SYNC_MODE;
+  typedef enum MARKER_MODE      { MARKER_MODE_ON, MARKER_MODE_OFF } MARKER_MODE;
+  typedef enum DEBUG_MODE       { DEBUG_MODE_ON, DEBUG_MODE_OFF } DEBUG_MODE;
+  typedef enum BOARD_MODE       {
+    BOARD_MODE_DEFAULT,
+    BOARD_MODE_DEBUG,
+    BOARD_MODE_ANALOG,
+    BOARD_MODE_DIGITAL,
+    BOARD_MODE_MARKER,
+    BOARD_MODE_BLE,
+    BOARD_MODE_END_OF_MODES
+  } BOARD_MODE;
+  typedef enum MULTI_CHAR_COMMAND {
+    MULTI_CHAR_CMD_NONE,
+    MULTI_CHAR_CMD_PROCESSING_INCOMING_SETTINGS_CHANNEL,
+    MULTI_CHAR_CMD_PROCESSING_INCOMING_SETTINGS_LEADOFF,
+    MULTI_CHAR_CMD_SERIAL_PASSTHROUGH,
+    MULTI_CHAR_CMD_SETTINGS_BOARD_MODE,
+    MULTI_CHAR_CMD_SETTINGS_SAMPLE_RATE,
+    MULTI_CHAR_CMD_INSERT_MARKER
+  } MULTI_CHAR_COMMAND;
+  typedef enum PACKET_TYPE {
+    PACKET_TYPE_ACCEL,
+    PACKET_TYPE_RAW_AUX,
+    PACKET_TYPE_USER_DEFINED,
+    PACKET_TYPE_ACCEL_TIME_SET,
+    PACKET_TYPE_ACCEL_TIME_SYNC,
+    PACKET_TYPE_RAW_AUX_TIME_SET,
+    PACKET_TYPE_RAW_AUX_TIME_SYNC
+  } PACKET_TYPE;
+  typedef enum SAMPLE_RATE {
+    SAMPLE_RATE_16000,
+    SAMPLE_RATE_8000,
+    SAMPLE_RATE_4000,
+    SAMPLE_RATE_2000,
+    SAMPLE_RATE_1000,
+    SAMPLE_RATE_500,
+    SAMPLE_RATE_250
+  } SAMPLE_RATE;
+
+  // STRUCTS
+  typedef struct {
+    uint32_t baudRate;
+    boolean  rx;
+    boolean  tx;
+  } SerialInfo;
+
+  typedef struct {
+    boolean rx;
+    boolean tx;
+  } SpiInfo;
+
+  typedef struct {
+    uint8_t sampleNumber;
+    uint8_t data[BLE_TOTAL_DATA_BYTES];
+    boolean ready;
+    boolean flushing;
+    uint8_t bytesFlushed;
+    uint8_t bytesLoaded;
+  } BLE;
+
+  // CONSTRUCTOR
+  OpenBCI_32bit_Library();
+
+  // PUBLIC METHODS (partial list)
+  void    begin(void);
+  void    boardReset(void);
+  void    attachDaisy(void);
+  boolean isADSDataAvailable(void);
+  void    readChannelData(void);
+  void    printChannelData(void);
+  void    csLow(int pin);
+  void    csHigh(int pin);
+  void    loop(void);
+  // ... all other public methods from original library ...
+
+  // PUBLIC VARIABLES (partial list)
+  boolean boardUseSRB1;
+  boolean daisyPresent;
+  boolean streaming;
+  byte    boardChannelDataRaw[OPENBCI_NUMBER_BYTES_PER_ADS_SAMPLE];
+  byte    channelSettings[OPENBCI_NUMBER_OF_CHANNELS_DAISY]
+                         [OPENBCI_NUMBER_OF_CHANNEL_SETTINGS];
+  // ... all other public variables from original library ...
+
+  // DSPI instance for SPI communication
+  DSPI0 spi;
+
+private:
+  // PRIVATE METHODS (partial list)
+  void initialize_ads(void);
+  byte xfer(byte data);
+  void boardBeginADSInterrupt(void);
+  // ... all other private methods from original library ...
+
+  // PRIVATE VARIABLES (partial list)
+  volatile boolean channelDataAvailable;
+  unsigned long lastSampleTime;
+  byte regData[24];
+  // ... all other private variables from original library ...
+};
+
+// Global instance
+extern OpenBCI_32bit_Library board;
+
+#endif // _____OpenBCI_32bit__
