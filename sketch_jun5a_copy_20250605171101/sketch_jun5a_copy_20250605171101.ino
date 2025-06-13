@@ -55,7 +55,7 @@ void setup() {
 
   // 3) Also bring up UART1 on pins D11/D12 at 115200:
   //    (leave commented if you don’t actually need UART1)
-  // Serial1.begin(115200);
+   Serial1.begin(115200);
 
   // 4) Tell the OpenBCI library to broadcast everything to Serial1, too:
   //    Internally, this calls beginSerial1(115200) and sets iSerial1.tx = true.
@@ -70,7 +70,9 @@ void setup() {
   board.begin();
   // Because we called beginSerial1(...), the startup banner (“$$$\nOpenBCI V3…”) 
   // is echoed to BOTH Serial and Serial1.
-
+  for (uint8_t ch = 5; ch <= 8; ch++) {
+    board.streamSafeChannelDeactivate(ch);
+  }
   // 7) Attach an interrupt to ADS_DRDY for the falling edge:
   attachInterrupt(digitalPinToInterrupt(ADS_DRDY), onDRDY, FALLING);
 
@@ -108,9 +110,9 @@ void loop() {
     char c = Serial.read();
 
     // 1) Echo it back for debugging:
-    Serial.print("Got from USB: ");
+    //Serial.print("Got from USB: ");
     Serial.println(c);
-    Serial1.print("Got from USB: ");
+    //Serial1.print("Got from USB: ");
     Serial1.println(c);
 
     // 2) If it’s lowercase 'b', force a tiny DRDY pulse then start streaming:
@@ -127,8 +129,8 @@ void loop() {
       board.streamStart();
 
       // (Optional) print a message so you know streamStart() was called:
-      Serial.println(">> streamStart() called");
-      Serial1.println(">> streamStart() called");
+      //Serial.println(">> streamStart() called");
+      //Serial1.println(">> streamStart() called");
     }
 
     // 3) Hand every character to the library’s built-in parser
@@ -139,20 +141,20 @@ void loop() {
   // (D) If you also want to accept commands over UART1, uncomment this block:
   // while (Serial1.available()) {
   //   char c1 = Serial1.read();
-  //   Serial.print("Got from UART1: ");
+  //   //Serial.print("Got from UART1: ");
   //   Serial.println(c1);
-  //   Serial1.print("Got from UART1: ");
+  //   //Serial1.print("Got from UART1: ");
   //   Serial1.println(c1);
-  //
+  
   //   if (c1 == 'b') {
   //     pinMode(ADS_DRDY, OUTPUT);
   //     digitalWrite(ADS_DRDY, LOW);
   //     delayMicroseconds(4);
   //     pinMode(ADS_DRDY, INPUT_PULLUP);
   //     board.streamStart();
-  //     Serial1.println(">> streamStart() called from UART1");
+  //     //Serial1.println(">> streamStart() called from UART1");
   //   }
-  //
+  
   //   board.processChar(c1);
   // }
 

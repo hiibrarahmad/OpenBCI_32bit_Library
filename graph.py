@@ -1,90 +1,177 @@
-import os
-import sys
-import pandas as pd
+#!/usr/bin/env python3
+"""
+plot_4ch_gui_fixed.py
+
+A Tkinter‐based GUI for plotting exactly four channels (Ch1–Ch4) from a CSV,
+with the Matplotlib toolbar placed in its own Frame so pack()/grid() do not conflict.
+
+Features:
+  • Loads a CSV with columns: Timestamp, Sample, Ch1, Ch2, Ch3, Ch4
+  • Four checkboxes (default: all checked) to toggle each channel on/off
+  • “Plot Combined” button redraws a single figure with up to 4 subplots (one per checked channel)
+  • Embedded Matplotlib toolbar (zoom/pan) always visible
+  • Responsive layout: canvas and toolbar resize with window
+"""
+
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
+import pandas as pd
 
-def main():
-    # ────────────────────────────────────────────────────────────────────────────────
-    # 1) CSV_PATH: either hardcode your CSV path here, or leave empty ("")
-    #    and the script will prompt you to type it at runtime.
-    CSV_PATH = ""  # e.g. r"C:\Users\Alice\Data\openbci_live.csv" or "/home/alice/openbci_live.csv"
-    # ────────────────────────────────────────────────────────────────────────────────
 
-    # If CSV_PATH is empty, ask the user
-    if not CSV_PATH:
-        CSV_PATH = input("D:\arduino library\libraries\OpenBCI_32bit_Library\output.csv").strip()
+class FourChannelPlotter(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("4-Channel CSV Plotter")
+        self.rowconfigure(0, weight=1)
+        self.columnconfigure(1, weight=1)
 
-    if not os.path.isfile(CSV_PATH):
-        print(f"ERROR: File not found: {CSV_PATH!r}")
-        sys.exit(1)
+        # Exactly four channels; adjust names here if your CSV differs
+        self.channels = ["Ch1", "Ch2", "Ch3", "Ch4"]
+        self.df = None
+        self.vars = {}  # maps channel name → IntVar for checkbox
 
-    # ────────────────────────────────────────────────────────────────────────────────
-    # 2) Which four channels do you want to plot?  
-    #    Must match your CSV column names exactly (e.g. "Ch1", "Ch2", …).  
-    #    Feel free to change to any four columns in your file (e.g. ["Ch5","Ch6","Ch7","Ch8"]).
-    channels_to_plot = ["Ch1", "Ch2", "Ch3", "Ch4"]
-    # ────────────────────────────────────────────────────────────────────────────────
+        self._build_left_panel()
+        self._build_right_panel()
 
-    # 3) Read CSV into pandas, parse the "Timestamp" column as datetime
-    try:
-        df = pd.read_csv(
-            CSV_PATH,
-            parse_dates=["Timestamp"],      # parse that column as datetime
-            infer_datetime_format=True,
-            dayfirst=False                  # adjust if your dates are day‐month‐year
+    def _build_left_panel(self):
+        left = tk.Frame(self, padx=10, pady=10)
+        left.grid(row=0, column=0, sticky="ns")
+        left.columnconfigure(0, weight=1)
+
+        # 1) Load CSV button
+        btn_load = tk.Button(left, text="Load CSV…", command=self._on_load_csv)
+        btn_load.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+
+        # 2) Four checkboxes, one per channel
+        for i, ch in enumerate(self.channels, start=1):
+            var = tk.IntVar(value=1)
+            cb = tk.Checkbutton(
+                left,
+                text=ch,
+                variable=var,
+                command=self._refresh_plot,  # redraw when toggled
+            )
+            cb.grid(row=i, column=0, sticky="w", pady=2)
+            self.vars[ch] = var
+
+        # 3) Plot Combined button
+        btn_plot = tk.Button(left, text="Plot Combined", command=self._plot_combined)
+        btn_plot.grid(row=len(self.channels) + 1, column=0, sticky="ew", pady=(10, 0))
+
+    def _build_right_panel(self):
+        right = tk.Frame(self, padx=5, pady=5)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.rowconfigure(1, weight=1)   # row 1 holds the canvas
+        right.columnconfigure(0, weight=1)
+
+        # Placeholder label (before data is loaded)
+        self.placeholder = tk.Label(
+            right,
+            text="No data loaded.\nClick “Load CSV…” to select your file.",
+            justify="center",
+            fg="gray",
         )
-    except Exception as e:
-        print(f"ERROR: Could not read CSV: {e}")
-        sys.exit(1)
+        self.placeholder.grid(row=0, column=0, sticky="nsew")
 
-    # Confirm that required columns exist
-    missing = [c for c in (["Timestamp"] + channels_to_plot) if c not in df.columns]
-    if missing:
-        print(f"ERROR: The following columns are missing in CSV: {missing}")
-        print(f"Available columns: {list(df.columns)}")
-        sys.exit(1)
+        # Create Matplotlib figure
+        self.fig = plt.Figure(figsize=(6, 5), tight_layout=True)
 
-    # 4) Optionally, sort by timestamp (in case your CSV isn’t already time‐ordered)
-    df = df.sort_values(by="Timestamp").reset_index(drop=True)
+        # 1) Create a container Frame for the toolbar (so toolbar can pack itself inside it)
+        self.toolbar_container = tk.Frame(right)
+        self.toolbar_container.grid(row=0, column=0, sticky="ew")
 
-    # 5) Create four stacked subplots (one per channel), sharing the x‐axis (time)
-    plt.style.use("seaborn‐darkgrid")
-    fig, axes = plt.subplots(
-        nrows=4,
-        ncols=1,
-        sharex=True,
-        figsize=(10, 8),
-        constrained_layout=True
-    )
+        # 2) Create the canvas (but don't grid it until after CSV is loaded)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=right)
+        self.canvas_widget = self.canvas.get_tk_widget()
+        self.canvas_widget.grid(row=1, column=0, sticky="nsew")
 
-    # Define a date‐formatter for the x‐axis
-    locator = mdates.AutoDateLocator(minticks=6, maxticks=12)
-    formatter = mdates.ConciseDateFormatter(locator)
+        # Hide toolbar container + canvas until CSV is loaded
+        self.toolbar_container.grid_remove()
+        self.canvas_widget.grid_remove()
 
-    for i, ch in enumerate(channels_to_plot):
-        ax = axes[i]
-        ax.plot(df["Timestamp"], df[ch], lw=0.8, color=f"C{i}")
-        ax.set_ylabel(ch, fontsize=10)
-        ax.grid(True)
+    def _on_load_csv(self):
+        """Open file dialog, read CSV, verify columns, then show toolbar+canvas."""
+        path = filedialog.askopenfilename(
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        if not path:
+            return
 
-        # If you want to set a fixed y‐range for all channels, uncomment and adjust below:
-        # ax.set_ylim(-9e6, 9e6)
+        try:
+            # Read CSV and parse Timestamp into datetime (if present)
+            self.df = pd.read_csv(path, parse_dates=["Timestamp"])
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not read CSV:\n{e}")
+            return
 
-        # Only format the x‐axis on the bottom subplot
-        if i == 3:
-            ax.xaxis.set_major_locator(locator)
-            ax.xaxis.set_major_formatter(formatter)
-            ax.set_xlabel("Time", fontsize=12)
-        else:
-            ax.tick_params(labelbottom=False)
+        # Verify that the four required channels exist
+        missing = [ch for ch in self.channels if ch not in self.df.columns]
+        if missing:
+            messagebox.showerror(
+                "Missing Columns",
+                f"The CSV is missing these columns: {missing}\n"
+                "Ensure you have Timestamp, Sample, Ch1, Ch2, Ch3, Ch4.",
+            )
+            self.df = None
+            return
 
-    # 6) Add a shared title
-    fig.suptitle("OpenBCI Channels " + ", ".join(channels_to_plot) + " vs. Time",
-                 fontsize=14, y=1.02)
+        # Remove placeholder, then show toolbar container + canvas
+        self.placeholder.grid_remove()
+        self.toolbar_container.grid()       # now we can place the toolbar
+        self.canvas_widget.grid()
 
-    # 7) Show the figure
-    plt.show()
+        # Instantiate the toolbar (it will pack() itself inside toolbar_container)
+        self.toolbar = NavigationToolbar2Tk(self.canvas, self.toolbar_container)
+        self.toolbar.update()
+
+        # Automatically draw for the first time (all four channels checked by default)
+        self._plot_combined()
+
+    def _get_checked(self):
+        """Return only those channels whose checkbox is checked."""
+        return [ch for ch, var in self.vars.items() if var.get() == 1]
+
+    def _clear_fig(self):
+        """Clear all axes from the figure."""
+        self.fig.clf()
+
+    def _plot_combined(self):
+        """Plot each checked channel in its own subplot (stacked vertically)."""
+        if self.df is None:
+            return
+
+        checked = self._get_checked()
+        if not checked:
+            self._clear_fig()
+            self.canvas.draw()
+            return
+
+        n = len(checked)
+        self._clear_fig()
+
+        for idx, ch in enumerate(checked, start=1):
+            ax = self.fig.add_subplot(n, 1, idx)
+            # Plot vs. Timestamp if present; else plot index
+            if "Timestamp" in self.df.columns:
+                ax.plot(self.df["Timestamp"], self.df[ch], label=ch)
+                ax.set_xlabel("Timestamp")
+            else:
+                ax.plot(self.df.index, self.df[ch], label=ch)
+                ax.set_xlabel("Index")
+            ax.set_ylabel(ch)
+            ax.grid(True)
+
+        self.fig.tight_layout()
+        self.canvas.draw()  # redraw on the embedded canvas
+
+    def _refresh_plot(self):
+        """Called whenever a checkbox toggles—just redraw."""
+        self._plot_combined()
+
 
 if __name__ == "__main__":
-    main()
+    app = FourChannelPlotter()
+    app.geometry("900x600")
+    app.mainloop()
