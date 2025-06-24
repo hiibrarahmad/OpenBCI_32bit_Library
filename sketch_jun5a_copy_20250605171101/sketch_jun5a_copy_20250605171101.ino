@@ -1,163 +1,138 @@
-// DefaultBoard.ino
-// ——————————————————————————————————————————————————————————
-// This sketch configures an XIAO‐nRF52840 Sense to drive an ADS1299 using
-// the OpenBCI_32bit_Library. It echoes all output to both USB‐Serial (Serial)
-// and UART1 (Serial1). Sending lowercase 'b' on either interface will cause
-// the ADS to start streaming. All data packets and printAll()/printlnAll() text
-// appear on both Serial and Serial1.
-//
-// Wiring (XIAO nRF52840 Sense):
-//   • ADS_DRDY  → D1
-//   • ADS_RST   → D2
-//   • BOARD_ADS → D0   (chip select for on-board ADS1299)
-//   • UART1 TX/RX → D11 / D12
-//
-// On startup (USB‐Serial and UART1 at 115200) you should see:
-//    $$$
-//    OpenBCI V3 8-Channel
-//    On Board ADS1299 Device ID: 0x3E
-//    Firmware: v3.1.2
-//    $$$
-//
-// Sending ‘b’ (lowercase) over USB‐Serial will trigger a brief DRDY pulse,
-// switch DRDY back to input, then call streamStart(). After that every time
-// DRDY goes low (or we detect it via polling), we read one sample and print it.
-//——————————————————————————————————————————————————————————
-
-#define __USER_ISR
 #include <SPI.h>
+#include <ArduinoBLE.h>
 #include <OpenBCI_32bit_Library.h>
 #include <OpenBCI_32bit_Library_Definitions.h>
 
-// Forward‐declare the DRDY interrupt routine:
-void onDRDY();
+// Reference library's global board
+extern OpenBCI_32bit_Library board;
 
-//— ADS DRDY ISR —————————————————————————————————————————————————————
-// Called when the ADS_DRDY pin FALLS (HIGH→LOW). We simply mark data ready.
+// BLE NUS service UUIDs
+static const char* BLE_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
+static const char* BLE_CHAR_RX_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
+static const char* BLE_CHAR_TX_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
+
+BLEService nusService(BLE_SERVICE_UUID);
+BLECharacteristic nusRxChar(BLE_CHAR_RX_UUID, BLEWriteWithoutResponse | BLEWrite, 20);
+BLECharacteristic nusTxChar(BLE_CHAR_TX_UUID, BLENotify, 244);
+bool isStreaming = false;
+
+void sendBleData(const uint8_t* data, size_t len) {
+  size_t offset = 0;
+  while (offset < len) {
+    size_t chunk = min((size_t)244, len - offset);
+    nusTxChar.writeValue(data + offset, chunk);
+    offset += chunk;
+  }
+}
+
 void onDRDY() {
   board.channelDataAvailable = true;
 }
 
-void setup() {
-  // 1) Configure ADS1299 pins on the XIAO:
-  pinMode(BOARD_ADS, OUTPUT);
-  digitalWrite(BOARD_ADS, HIGH);   // keep CS high until SPI.beginTransaction()
-
-  pinMode(ADS_DRDY, INPUT_PULLUP);  // DRDY idles HIGH, pulses LOW
-  pinMode(ADS_RST, OUTPUT);
-  digitalWrite(ADS_RST, HIGH);      // keep ADS not reset
-
-  // 2) Start USB Serial at 115200 baud (must match BCI‐GUI):
-  Serial.begin(115200);
-  while (!Serial) {
-    // wait for USB‐Serial to be ready
-  }
-
-  // 3) Also bring up UART1 on pins D11/D12 at 115200:
-  //    (leave commented if you don’t actually need UART1)
-   Serial1.begin(115200);
-
-  // 4) Tell the OpenBCI library to broadcast everything to Serial1, too:
-  //    Internally, this calls beginSerial1(115200) and sets iSerial1.tx = true.
-  //    If you don’t have a USB‐Serial on Serial1, you can skip this line.
-  board.beginSerial1(115200);
-
-  // 5) Begin SPI bus (needed by the ADS1299 library):
-  SPI.begin();
-
-  // 6) Brief delay, then call board.begin():
-  delay(50);
-  board.begin();
-  // Because we called beginSerial1(...), the startup banner (“$$$\nOpenBCI V3…”) 
-  // is echoed to BOTH Serial and Serial1.
-  for (uint8_t ch = 5; ch <= 8; ch++) {
-    board.streamSafeChannelDeactivate(ch);
-  }
-  // 7) Attach an interrupt to ADS_DRDY for the falling edge:
-  attachInterrupt(digitalPinToInterrupt(ADS_DRDY), onDRDY, FALLING);
-
-  // 8) (Optional) Immediately start streaming so you don’t have to type ‘b’
-  //    at all. If you uncomment the next two lines, you’ll begin streaming 
-  //    as soon as the board boots. Otherwise, comment them out and use ‘b’.
-  //
-  // pinMode(ADS_DRDY, OUTPUT);       
-  // digitalWrite(ADS_DRDY, LOW);     
-  // pinMode(ADS_DRDY, INPUT_PULLUP);  
-  // board.streamStart();
-}
-
-void loop() {
-  // ----------------------------------------------------------------------------------
-  // (A) POLL-BASED FALLBACK: if DRDY is LOW right now, force channelDataAvailable = true.
-  //      This ensures you’ll see data even if the interrupt never fires perfectly.
-  if (digitalRead(ADS_DRDY) == LOW) {
-    board.channelDataAvailable = true;
-  }
-
-  // (B) If DRDY interrupt (or polling) fired, read & send exactly one packet:
-  if (board.channelDataAvailable) {
-    board.channelDataAvailable = false;
-
-    // 1) Pull one sample (3 bytes × 8 channels) via SPI, convert to 32‐bit:
-    board.updateChannelData();
-
-    // 2) Send the packet out on both Serial and Serial1:
-    board.sendChannelData();
-  }
-
-  // (C) Check for incoming commands from USB-Serial:
-  while (Serial.available()) {
-    char c = Serial.read();
-
-    // 1) Echo it back for debugging:
-    //Serial.print("Got from USB: ");
-    Serial.println(c);
-    //Serial1.print("Got from USB: ");
-    Serial1.println(c);
-
-    // 2) If it’s lowercase 'b', force a tiny DRDY pulse then start streaming:
+void bleWritten(BLEDevice central, BLECharacteristic characteristic) {
+  uint8_t buf[20];
+  int len = nusRxChar.valueLength();
+  nusRxChar.readValue(buf, len);
+  for (int i = 0; i < len; i++) {
+    char c = (char)buf[i];
+    Serial.write(c);
+    Serial1.write(c);
+    nusTxChar.writeValue((uint8_t*)&c, 1);
     if (c == 'b') {
-      // Temporarily drive DRDY pin LOW for ~4 μs to “fake” a data-ready pulse:
       pinMode(ADS_DRDY, OUTPUT);
       digitalWrite(ADS_DRDY, LOW);
       delayMicroseconds(4);
-
-      // Immediately restore DRDY as input so the ADS can drive it afterward:
       pinMode(ADS_DRDY, INPUT_PULLUP);
-
-      // Now tell the ADS1299 to start continuous conversion:
-      board.streamStart();
-
-      // (Optional) print a message so you know streamStart() was called:
-      //Serial.println(">> streamStart() called");
-      //Serial1.println(">> streamStart() called");
+      board.streamStart(); isStreaming = true;
+    } else if (c == 's') {
+      board.streamStop(); isStreaming = false;
     }
+    board.processChar(c);
+  }
+}
 
-    // 3) Hand every character to the library’s built-in parser
-    //    (for commands like 's', 'x', 'c', etc.):
+void setup() {
+  // ADS1299 wiring
+  pinMode(BOARD_ADS, OUTPUT); digitalWrite(BOARD_ADS, HIGH);
+  pinMode(ADS_DRDY, INPUT_PULLUP);
+  pinMode(ADS_RST, OUTPUT);  digitalWrite(ADS_RST, HIGH);
+
+  // Serial for debug
+  Serial.begin(115200);
+  while (!Serial);
+  Serial1.begin(115200);
+  board.beginSerial1(115200);
+
+  // SPI + ADS init
+  SPI.begin(); delay(50);
+  board.begin();
+  for (uint8_t ch = 5; ch <= 8; ch++) board.streamSafeChannelDeactivate(ch);
+  attachInterrupt(digitalPinToInterrupt(ADS_DRDY), onDRDY, FALLING);
+
+  // BLE init
+  if (!BLE.begin()) {
+    Serial.println("BLE init failed");
+    while (1);
+  }
+  BLE.setLocalName("nuira eeg");
+  BLE.setAdvertisedService(nusService);
+  nusService.addCharacteristic(nusRxChar);
+  nusService.addCharacteristic(nusTxChar);
+  BLE.addService(nusService);
+  nusRxChar.setEventHandler(BLEWritten, bleWritten);
+  BLE.advertise();
+  Serial.println("BLE advertise nuira eeg");
+}
+
+void loop() {
+  BLE.poll();
+
+  if (isStreaming && digitalRead(ADS_DRDY) == LOW) board.channelDataAvailable = true;
+  if (isStreaming && board.channelDataAvailable) {
+    board.channelDataAvailable = false;
+    board.updateChannelData();
+
+    const int numChannels = 3;  // only send first 3 channels
+    const int auxBytes = OPENBCI_NUMBER_OF_BYTES_AUX;
+    static uint8_t pkt[2 + numChannels*(1 + 3) + auxBytes + 1];
+    int idx = 0;
+    pkt[idx++] = PCKT_START;
+    pkt[idx++] = board.sampleCounter;
+    for (uint8_t ch = 0; ch < numChannels; ch++) {
+      pkt[idx++] = ch;
+      pkt[idx++] = board.boardChannelDataRaw[3*ch + 0];
+      pkt[idx++] = board.boardChannelDataRaw[3*ch + 1];
+      pkt[idx++] = board.boardChannelDataRaw[3*ch + 2];
+    }
+    for (int a = 0; a < auxBytes; a++) pkt[idx++] = board.auxData[a];
+    pkt[idx++] = (uint8_t)(PCKT_END | board.curPacketType);
+
+    sendBleData(pkt, idx);
+    board.sendChannelData();  // also raw to Serial
+  }
+
+  while (Serial.available()) {
+    char c = Serial.read();
+    Serial1.write(c);
+    char tmp[3] = { (char)c, '\r', '\n' };
+    sendBleData((uint8_t*)tmp, 3);
+    if (c == 'b') { pinMode(ADS_DRDY, OUTPUT); digitalWrite(ADS_DRDY, LOW);
+      delayMicroseconds(4); pinMode(ADS_DRDY, INPUT_PULLUP);
+      board.streamStart(); isStreaming = true; }
+    else if (c == 's') { board.streamStop(); isStreaming = false; }
+    board.processChar(c);
+  }
+  while (Serial1.available()) {
+    char c = Serial1.read();
+    Serial.write(c);
+    char tmp[3] = { (char)c, '\r', '\n' };
+    sendBleData((uint8_t*)tmp, 3);
+    if (c == 'b') { pinMode(ADS_DRDY, OUTPUT); digitalWrite(ADS_DRDY, LOW);
+      delayMicroseconds(4); pinMode(ADS_DRDY, INPUT_PULLUP);
+      board.streamStart(); isStreaming = true; }
+    else if (c == 's') { board.streamStop(); isStreaming = false; }
     board.processChar(c);
   }
 
-  // (D) If you also want to accept commands over UART1, uncomment this block:
-  // while (Serial1.available()) {
-  //   char c1 = Serial1.read();
-  //   //Serial.print("Got from UART1: ");
-  //   Serial.println(c1);
-  //   //Serial1.print("Got from UART1: ");
-  //   Serial1.println(c1);
-  
-  //   if (c1 == 'b') {
-  //     pinMode(ADS_DRDY, OUTPUT);
-  //     digitalWrite(ADS_DRDY, LOW);
-  //     delayMicroseconds(4);
-  //     pinMode(ADS_DRDY, INPUT_PULLUP);
-  //     board.streamStart();
-  //     //Serial1.println(">> streamStart() called from UART1");
-  //   }
-  
-  //   board.processChar(c1);
-  // }
-
-  // (E) Let the library service any multi-character timeouts or pending commands:
   board.loop();
 }

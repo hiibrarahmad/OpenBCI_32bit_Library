@@ -16,7 +16,7 @@
 #define OPENBCI_BAUD_RATE_MIN_NO_AVG 200000
 
 // File transmissions
-#define OPENBCI_BOP 'A0' // Begining of stream packet
+#define OPENBCI_BOP 'A' // Begining of stream packet
 
 //PIN CONNECTIONS
 #define ADS_DRDY    D1
