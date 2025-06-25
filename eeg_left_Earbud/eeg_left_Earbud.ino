@@ -59,7 +59,7 @@ void setup() {
 
   // Serial for debug
   Serial.begin(115200);
-  while (!Serial);
+  delay(200);  // Optional: give it time to settle
   Serial1.begin(115200);
   board.beginSerial1(115200);
 
@@ -74,7 +74,7 @@ void setup() {
     Serial.println("BLE init failed");
     while (1);
   }
-  BLE.setLocalName("nuira eeg");
+  BLE.setLocalName("Niura EEG BUDS L");
   BLE.setAdvertisedService(nusService);
   nusService.addCharacteristic(nusRxChar);
   nusService.addCharacteristic(nusTxChar);
@@ -92,9 +92,8 @@ void loop() {
     board.channelDataAvailable = false;
     board.updateChannelData();
 
-    const int numChannels = 3;  // only send first 3 channels
-    const int auxBytes = OPENBCI_NUMBER_OF_BYTES_AUX;
-    static uint8_t pkt[2 + numChannels*(1 + 3) + auxBytes + 1];
+    const int numChannels = 3;
+    static uint8_t pkt[2 + numChannels*(1 + 3) + 1];  // Removed auxBytes
     int idx = 0;
     pkt[idx++] = PCKT_START;
     pkt[idx++] = board.sampleCounter;
@@ -104,7 +103,6 @@ void loop() {
       pkt[idx++] = board.boardChannelDataRaw[3*ch + 1];
       pkt[idx++] = board.boardChannelDataRaw[3*ch + 2];
     }
-    for (int a = 0; a < auxBytes; a++) pkt[idx++] = board.auxData[a];
     pkt[idx++] = (uint8_t)(PCKT_END | board.curPacketType);
 
     sendBleData(pkt, idx);
@@ -116,21 +114,28 @@ void loop() {
     Serial1.write(c);
     char tmp[3] = { (char)c, '\r', '\n' };
     sendBleData((uint8_t*)tmp, 3);
-    if (c == 'b') { pinMode(ADS_DRDY, OUTPUT); digitalWrite(ADS_DRDY, LOW);
+    if (c == 'b') {
+      pinMode(ADS_DRDY, OUTPUT); digitalWrite(ADS_DRDY, LOW);
       delayMicroseconds(4); pinMode(ADS_DRDY, INPUT_PULLUP);
-      board.streamStart(); isStreaming = true; }
-    else if (c == 's') { board.streamStop(); isStreaming = false; }
+      board.streamStart(); isStreaming = true;
+    } else if (c == 's') {
+      board.streamStop(); isStreaming = false;
+    }
     board.processChar(c);
   }
+
   while (Serial1.available()) {
     char c = Serial1.read();
     Serial.write(c);
     char tmp[3] = { (char)c, '\r', '\n' };
     sendBleData((uint8_t*)tmp, 3);
-    if (c == 'b') { pinMode(ADS_DRDY, OUTPUT); digitalWrite(ADS_DRDY, LOW);
+    if (c == 'b') {
+      pinMode(ADS_DRDY, OUTPUT); digitalWrite(ADS_DRDY, LOW);
       delayMicroseconds(4); pinMode(ADS_DRDY, INPUT_PULLUP);
-      board.streamStart(); isStreaming = true; }
-    else if (c == 's') { board.streamStop(); isStreaming = false; }
+      board.streamStart(); isStreaming = true;
+    } else if (c == 's') {
+      board.streamStop(); isStreaming = false;
+    }
     board.processChar(c);
   }
 

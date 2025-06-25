@@ -7,9 +7,9 @@
 extern OpenBCI_32bit_Library board;
 
 // BLE NUS service UUIDs
-static const char* BLE_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
-static const char* BLE_CHAR_RX_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
-static const char* BLE_CHAR_TX_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E";
+static const char* BLE_SERVICE_UUID = "6E400101-B5A3-F393-E0A9-E50E24DCCA9E";
+static const char* BLE_CHAR_RX_UUID = "6E400102-B5A3-F393-E0A9-E50E24DCCA9E";
+static const char* BLE_CHAR_TX_UUID = "6E400103-B5A3-F393-E0A9-E50E24DCCA9E";
 
 BLEService nusService(BLE_SERVICE_UUID);
 BLECharacteristic nusRxChar(BLE_CHAR_RX_UUID, BLEWriteWithoutResponse | BLEWrite, 20);
@@ -74,7 +74,7 @@ void setup() {
     Serial.println("BLE init failed");
     while (1);
   }
-  BLE.setLocalName("Niura EEG BUDS L");
+  BLE.setLocalName("Niura EEG BUDS R");
   BLE.setAdvertisedService(nusService);
   nusService.addCharacteristic(nusRxChar);
   nusService.addCharacteristic(nusTxChar);
