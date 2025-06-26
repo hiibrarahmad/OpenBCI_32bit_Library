@@ -1,321 +1,289 @@
-[![Stories in Ready](https://badge.waffle.io/OpenBCI/OpenBCI_32bit_Library.png?label=ready&title=Ready)](https://waffle.io/OpenBCI/OpenBCI_32bit_Library)
-# OpenBCI 32bit Library
-
-The official library for the OpenBCI 32bit Board.
+# Niura EEG Buds Firmware for nRF52840 XIAO (Seeed Studio)
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Hardware Requirements](#hardware-requirements)
+- [Pinout and Wiring](#pinout-and-wiring)
+- [Firmware Structure](#firmware-structure)
+- [How BLE Communication Works](#how-ble-communication-works)
+- [Data Packet Structure](#data-packet-structure)
+- [Supported Commands](#supported-commands)
+- [Installation & Flashing](#installation--flashing)
+  - [1. Bootloader Installation (Fresh nRF52840)](#1-bootloader-installation-fresh-nrf52840)
+  - [2. Arduino IDE Setup](#2-arduino-ide-setup)
+  - [3. Flashing the Firmware](#3-flashing-the-firmware)
+- [OpenBCI GUI Integration](#openbci-gui-integration)
+- [Troubleshooting](#troubleshooting)
+- [Dependencies](#dependencies)
+- [Related Repositories](#related-repositories)
+- [Credits](#credits)
+- [License](#license)
+- [Contact](#contact)
+
+---
+
+## Overview
+
+This repository contains firmware for **Niura EEG Buds**, custom-built for wireless EEG signal acquisition with the nRF52840 XIAO (Seeed Studio) and ADS1299-based OpenBCI-compatible front-end. This firmware enables the XIAO to stream multi-channel EEG data over BLE (Bluetooth Low Energy) and Serial, making it usable with custom OpenBCI GUIs or any BLE client. 
+
+It includes separate firmware for the **left** and **right** buds, each using unique BLE service UUIDs to allow simultaneous operation. The code also provides robust command and data handling via UART and BLE—enabling real-time EEG visualization and experiment flexibility.
+
+---
+
+## Features
+
+- **BLE Nordic UART Service (NUS) Streaming**
+  - Unique service/characteristics per bud (left/right)
+  - Up to 244 bytes per BLE packet (max MTU for ArduinoBLE)
+  - Both command and EEG data transfer
+- **ADS1299 + OpenBCI 32bit Library**
+  - 3 EEG channels (expandable by code)
+  - Real-time streaming, acquisition, and packetizing
+  - Safe channel deactivation for unused channels (5 to 8)
+- **Bi-Directional Command Handling**
+  - BLE or Serial (UART) control
+  - OpenBCI-compatible ASCII commands, e.g., start/stop, config, etc.
+  - Immediate feedback via BLE notifications and serial prints
+- **Interrupt-Driven Data Ready (DRDY)**
+  - Accurate timing for EEG samples via hardware interrupt
+- **Robust Initialization and Error Handling**
+  - BLE error detection and recovery
+  - Serial debug output for every stage
+- **OpenBCI GUI & Custom GUI Compatibility**
+  - Seamless integration with [@hiibrarahmad/Open_bci_GUI_with-custom](https://github.com/hiibrarahmad/Open_bci_GUI_with-custom)
+  - Data can also be read by any BLE/NUS client or serial terminal
+
+---
+
+## Hardware Requirements
+
+| Component               | Details                                                           |
+|-------------------------|-------------------------------------------------------------------|
+| **MCU**                 | nRF52840 XIAO (Seeed Studio)                                     |
+| **EEG Front-End**       | ADS1299 (as used in OpenBCI 32bit)                               |
+| **Power**               | 3.3V supply (battery or USB)                                     |
+| **Wiring**              | SPI (SCK, MISO, MOSI, CS), DRDY, RESET                           |
+| **Programming**         | USB for firmware upload; SWD (or USB) for bootloader if needed    |
+
+---
+
+## Pinout and Wiring
+
+**Typical Pin Connections:**
+
+| XIAO Pin    | ADS1299 Pin | Function         | Firmware Macro    |
+|:------------|:------------|:-----------------|:-----------------|
+| D2          | DRDY        | Data Ready       | ADS_DRDY         |
+| D3          | RST         | Reset            | ADS_RST          |
+| D10         | CS          | Chip Select      | BOARD_ADS        |
+| D11         | MOSI        | SPI MOSI         |                  |
+| D12         | MISO        | SPI MISO         |                  |
+| D13         | SCK         | SPI Clock        |                  |
+| 3V3         | VCC         | Power            |                  |
+| GND         | GND         | Ground           |                  |
+
+**Note:**  
+- Pin assignments may vary based on your shield or custom board.  
+- Update `BOARD_ADS`, `ADS_DRDY`, and `ADS_RST` in the firmware if your wiring is different.
+
+---
+
+## Firmware Structure
+
+- `lef_eeg_air_bud.ino`: Firmware for the **left** EEG bud (`Niura EEG BUDS L`)
+- `right_eeg_air_bud.ino`: Firmware for the **right** EEG bud (`Niura EEG BUDS R`)
+- Both files include:
+  - BLE initialization with unique UUIDs
+  - Serial diagnostic output
+  - SPI and ADS1299 setup
+  - Interrupt-based data ready handling
+  - Command parsing and data streaming logic
 
-## Table of Contents:
+---
 
-1. [Minimums](#minimums)
-2. [Installing](#installing)
-3. [Upgrading](#upgrading)
-4. [Downgrading](#downgrading)
-3. [General Overview](#generalOverview)
-  1. [Includes](#includes)
-  2. [setup()](#setup)
-  3. [loop()](#loop)
-4. [System Overview](#systemOverview)
-5. [Reference Guide](#referenceGuide)
-  1. [Functions](#functions)
-  2. [Enums](#enums)
-
-## <a name="minimums"></a> Minimums:
-
-You just opened your OpenBCI (congrats!) and want to get started programming the firmware right now?! Ok, ok do the following minimums!
-1. Install the dongle drivers [from FTDI](http://www.ftdichip.com/FTDrivers.htm) for your operating system.
-2. Download the latest Arduino IDE software from the [Arduino site](www.arduino.cc)
-3. Follow the 2nd installation method "Manual install by copying ZIP file" to install the latest chipKIT-core hardware files from the [chipKIT-core wiki](http://chipkit.net/wiki/index.php?title=ChipKIT_core)
-
-## <a name="installing"></a> Installing:
-
-1. Download this repository zip or clone this repo (we clone directly into the `libraries` folder for development)
-2. Download [OpenBCI_32bit_SD](https://github.com/OpenBCI/OpenBCI_32bit_SD)
-3. Move both of the folders into your `libraries` folder (please make a folder in Arduino named libraries if you don't have one)
-  * Mac OSX: User/Documents/Arduino/libraries
-  * Windows: /My Documents/Arduino/libraries
-4. Restart Arduino IDE
-5. Open `DefaultBoard.ino` for a full featured example.
-6. Hack and make awesome stuff!
+## How BLE Communication Works
 
-## <a name="upgrading"></a> Upgrading:
+- **Service Setup**: Each bud advertises a custom BLE service (NUS-like) with RX (write) and TX (notify) characteristics.
+- **Command Reception**: BLE central (e.g., GUI or smartphone) writes commands (max 20 bytes) to the RX characteristic.
+- **Data Transmission**: EEG data packets are sent as notifications (up to 244 bytes each) via the TX characteristic.
+- **Simultaneous Serial Support**: All commands/data are mirrored over UART for debugging or legacy OpenBCI GUI use.
+- **Start/Stop Streaming**: Sending `'b'` over BLE or serial starts streaming, `'s'` stops it.
 
-Checkout the [upgrade guide](./UPGRADE_GUIDE.md)!
+### BLE UUIDs
 
-## <a name="downgrading"></a> Downgrading:
+| Bud   | Service UUID                            | RX Char UUID                            | TX Char UUID                            |
+|-------|-----------------------------------------|-----------------------------------------|-----------------------------------------|
+| Left  | `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`  | `6E400002-B5A3-F393-E0A9-E50E24DCCA9E`  | `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`  |
+| Right | `6E400101-B5A3-F393-E0A9-E50E24DCCA9E`  | `6E400102-B5A3-F393-E0A9-E50E24DCCA9E`  | `6E400103-B5A3-F393-E0A9-E50E24DCCA9E`  |
 
-Have a bunch of custom firmware based on the original firmware? Have no fear for previous releases are [here](https://github.com/OpenBCI/OpenBCI_32bit_Library/releases) and [here for the radios if needed](https://github.com/OpenBCI/OpenBCI_Radios/releases).
+---
 
-## <a name="generalOverview"></a> General Overview:
+## Data Packet Structure
 
-Your needs dictate what you need to include! This saves a ton of precious memory space!
+- Each data packet contains a start byte, sample counter, channel data, and an end byte.
+- Example for 3 channels:
 
-### <a name="includes"></a> Includes:
+| Byte Index  | Contents                                  |
+|-------------|-------------------------------------------|
+| 0           | Packet Start (`PCKT_START`)               |
+| 1           | Sample Counter (rolling, 0-255)           |
+| 2           | Channel 0 Index (0)                       |
+| 3-5         | Channel 0 24-bit raw data (`[0],[1],[2]`) |
+| 6           | Channel 1 Index (1)                       |
+| 7-9         | Channel 1 24-bit raw data                 |
+| 10          | Channel 2 Index (2)                       |
+| 11-13       | Channel 2 24-bit raw data                 |
+| 14          | Packet End (`PCKT_END | curPacketType`)   |
 
-#### Default OpenBCI with SD Card Functionality
+- **Note:** Each channel's data is 3 bytes (24 bits, big endian).
+- **MTU:** BLE notifications are split into chunks of up to 244 bytes.
 
-In order to use the SD card write functionality, you must not only include the file `SD_Card_Stuff.ino` located in examples/DefaultBoard, you must include the following:
+---
 
-Headers:
-```Arduino
-#include <OBCI32_SD.h>
-#include <DSPI.h>
-#include <EEPROM.h>
-#include <OpenBCI_32bit_Library.h>
-#include <OpenBCI_32bit_Library_Definitions.h>
-```
+## Supported Commands
 
-Variables used by `SD_Card_Stuff.ino`:
-```Arduino
-boolean addAccelToSD = false;
-boolean addAuxToSD = false;
-boolean SDfileOpen = false;
-```
+| Command | Description                 | Sent via       | Action                                                      |
+|---------|-----------------------------|----------------|-------------------------------------------------------------|
+| `b`     | Begin data streaming        | BLE/Serial     | Sets DRDY LOW, starts ADS1299 streaming, enables streaming  |
+| `s`     | Stop data streaming         | BLE/Serial     | Stops ADS1299 streaming, disables streaming                 |
+| Any     | OpenBCI ASCII command       | BLE/Serial     | Passed to OpenBCI parser, e.g. channel config, test mode    |
 
-#### Bare OpenBCI Board with no SD card
+- All received commands are echoed to both BLE (as notification) and UART for debugging.
 
-Headers:
-```Arduino
-#include <DSPI.h>
-#include <OpenBCI_32bit_Library.h>
-#include <OpenBCI_32bit_Library_Definitions.h>
-```
+---
 
-You do not need to declare any variables...
+## Installation & Flashing
 
-### <a name="setup"></a> setup():
+### 1. Bootloader Installation (Fresh nRF52840)
 
-#### Accel (default)
-```Arduino
-void setup() {
-  board.begin(); // Bring up the OpenBCI Board
-  // The board will use accel data by default
-}
-```
+If your XIAO nRF52840 is blank or has no bootloader, you MUST flash one before uploading firmware with Arduino IDE.
 
-#### Aux
-```Arduino
-void setup() {
-  board.begin(); // Bring up the OpenBCI Board
-  board.useAccel(false); // Notify the board we want to use aux data, this effects `::sendChannelData()`
-}
-```
+- Follow the guide and use the resources in:  
+  [@hiibrarahmad/bootloadnrf52840](https://github.com/hiibrarahmad/bootloadnrf52840)
+- Includes:
+  - UF2 bootloader binaries
+  - Instructions for using a SWD debugger or USB drag-and-drop
+  - Trouble recovery steps
 
-### <a name="loop"></a> loop():
+### 2. Arduino IDE Setup
 
-We will start with the basics here, and work our way up... The loop function can be thought of as the meat and core executor of the OpenBCI_32bit_Library functionality. Keep in mind the main purpose of this library is to stream data from the ADS1299 to the computer, that's our focus, everything takes a back seat to that.
+- Download & install [Arduino IDE](https://www.arduino.cc/en/software)
+- Install XIAO nRF52840 board support via Boards Manager ([official guide](https://wiki.seeedstudio.com/XIAO_BLE_Board_Support_Package/))
+- Install required libraries:
+  - [ArduinoBLE](https://www.arduino.cc/en/Reference/ArduinoBLE)
+  - [OpenBCI_32bit_Library](https://github.com/hiibrarahmad/OpenBCI_32bit_Library)
+- Select the correct Board: **Seeed nRF52840 XIAO**
+- Select the correct port (shows as "XIAO nRF52840" or similar)
 
-A bare board, not using the SD, accel, or aux data must have the following:
-```Arduino
-void loop() {
-  board.loop();
-  if (board.streaming) {
-    if (board.channelDataAvailable) {
-      // Read from the ADS(s), store data, set channelDataAvailable flag to false
-      board.updateChannelData();
+### 3. Flashing the Firmware
 
-      board.sendChannelData();
-    }
-  }
+- Open either `lef_eeg_air_bud.ino` or `right_eeg_air_bud.ino` in Arduino IDE.
+- Compile (`Verify`) the sketch to check for errors.
+- Upload (`Upload`) to the XIAO nRF52840.
+- Open the Serial Monitor (baud: 115200) for debug logs.
 
-  // Check the serial port for new data
-  if (board.hasDataSerial0()) {
-    // Read one char and process it
-    board.processChar(board.getCharSerial0());
-  }
-}
-```
-The first `if` statement is only `true` if a `b` command is ran through the `processChar` function. The next `if` statement exploits a `volatile` interrupt driven `boolean` called `channelDataAvailable`. This interrupt driven system is new as of firmware version 2.0.0 a discussion of it can be [found here](https://github.com/OpenBCI/OpenBCI_32bit_Library/issues/22). If the ADS1299 has signaled to the Board new data is ready, the function `updateChannelData()` is executed. This function will grab new data from the Board's ADS1299 (and from the daisy's ADS1299) and store that data to the arrays: `lastBoardDataRaw`, `boardChannelDataRaw`, `meanBoardDataRaw`, `lastDaisyDataRaw`, `daisyChannelDataRaw`, `meanDaisyDataRaw`, which can be accessed to drive filters or whatever your heart desires.
+---
 
+## OpenBCI GUI Integration
 
-## <a name="systemOverview"></a> System Overview:
+- Use the customized GUI:  
+  [@hiibrarahmad/Open_bci_GUI_with-custom](https://github.com/hiibrarahmad/Open_bci_GUI_with-custom)
+- Features:
+  - BLE and Serial connection support
+  - Visualization tuned for Niura EEG Buds packet format
+  - Start/stop and configuration commands from GUI
+- You may also use any BLE terminal (e.g., nRF Connect) or serial monitor for testing
+  - Ensure you use correct UUIDs for connecting
 
-### Sending Channel Data
-In the OpenBCI system, and with most wireless systems, we are restricted by the rate at which we can send data.
+---
 
-If you send a packet from the Pic32 to the Device RFduino and you start it with `0x41`, write 31 bytes, and follow with `0xCX` (where `X` can be `0-F` hex) then the packet will immediately be sent from the Device radio. This is counter to how if you want to send a message longer than 31 bytes (takes over two packets to transmit from Device radio to Host radio (Board to Dongle)) then you simply write the message, and that message will be sent in a multipacket format that allows it to be reassembled on the Dongle. This reassembling of data is critical to over the air programming.
+## Troubleshooting
 
-# <a name="referenceGuide"></a> Reference Guide:
+**BLE Not Advertising**
+- Confirm BLE.begin() returns true (check serial output)
+- Try power-cycling the board
+- Make sure no other device is connected to the bud
 
-## <a name="functions"></a> Functions:
+**Cannot Upload Sketch**
+- Ensure correct board and port
+- If upload fails repeatedly, check bootloader with [@hiibrarahmad/bootloadnrf52840](https://github.com/hiibrarahmad/bootloadnrf52840)
 
-### accelHasNewData()
+**No EEG Data**
+- Confirm correct wiring (DRDY, CS, RESET, SPI)
+- Check if DRDY interrupt is firing (add debug prints)
+- Check that OpenBCI_32bit_Library is correctly initialized
 
-Reads a status register to see if there is new accelerometer data.
+**Commands Not Responding**
+- Check that BLE central (app/GUI) is writing to RX characteristic
+- Try sending commands over serial to verify firmware logic
 
-**_Returns_** {boolean}
+**Data Corruption or Packet Loss**
+- Ensure BLE MTU is set to 244 on central/client
+- Reduce number of channels or data rate if necessary
 
-`true` if the accelerometer has new data.
+---
 
-### accelUpdateAxisData()
+## Dependencies
 
-Reads from the accelerometer to get new X, Y, and Z data. Updates the global array `axisData`.
+- [ArduinoBLE](https://www.arduino.cc/en/Reference/ArduinoBLE)
+- [OpenBCI_32bit_Library (custom fork)](https://github.com/hiibrarahmad/OpenBCI_32bit_Library)
+- [@hiibrarahmad/bootloadnrf52840](https://github.com/hiibrarahmad/bootloadnrf52840) (for bootloader installation)
+- [@hiibrarahmad/Open_bci_GUI_with-custom](https://github.com/hiibrarahmad/Open_bci_GUI_with-custom) (for visualization and command interface)
 
-### begin()
+---
 
-The function the OpenBCI board will call in `setup()`.
+## Related Repositories
 
-### beginDebug()
+- [@hiibrarahmad/bootloadnrf52840](https://github.com/hiibrarahmad/bootloadnrf52840): Full instructions and resources for flashing the nRF52840 XIAO bootloader for Arduino compatibility, including troubleshooting and recovery methods.
+- [@hiibrarahmad/Open_bci_GUI_with-custom](https://github.com/hiibrarahmad/Open_bci_GUI_with-custom): A custom OpenBCI GUI compatible with the Niura EEG Buds' BLE/serial packet format and command set.
+- [@hiibrarahmad/OpenBCI_32bit_Library](https://github.com/hiibrarahmad/OpenBCI_32bit_Library): Forked and ported library for nRF52840 and custom EEG hardware.
 
-The function the OpenBCI board will call in setup. Turns sniff mode on and allows you to tap into the serial port that is broken out on the OpenBCI 32bit board.
+---
 
-You must alter `Board_Defs.h` file located:
+## Credits
 
-On Mac:    
-`/Users/username/Documents/Arduino/hardware/chipkit-core/pic32/variants/openbci/Board_Defs.h`
-On Windows:
+- Firmware and porting: [@hiibrarahmad](https://github.com/hiibrarahmad)
+- OpenBCI Community: For the original libraries and hardware inspiration
+- Seeed Studio: For XIAO nRF52840 hardware
 
-`C:\Users\username\Documents\Arduino\hardware\chipkit-core\pic32\variants\openbci\Board_Defs.h`
+---
 
-Specifically lines `311` and `313`, change `7` and `10` to `11` and `12` for `_SER1_TX_PIN` and `_SER1_RX_PIN` respectively. Check out this sweet gif if you are a visual person http://g.recordit.co/3jH01sMD6Y.gif
+## License
 
-You will need to reflash your board! But now you can connect to pins `11` (`TX`) and `12` (`RX`) via any 3V3 serial to USB driver. Remember to use 3V3, 115200 baud, and have a common ground!
+MIT License (or specify your own).
 
-### hasDataSerial0()
+---
 
-Called in every `loop()` and checks `Serial0`.
+## Contact
 
-**_Returns_** {boolean}
+For support or collaboration, open an issue on this repo or contact [@hiibrarahmad](https://github.com/hiibrarahmad).
 
-`true` if there is data ready to be read.
+---
 
-### hasDataSerial1()
+## Changelog
 
-Called in every `loop()` and checks `Serial1`.
+- v1.0.0: Initial public release (separate left/right bud firmware, BLE/serial, OpenBCI integration)
+- v1.1.0: Improved documentation, error handling, and build instructions
 
-**_Returns_** {boolean}
+---
 
-`true` if there is data ready to be read.
+## FAQ (Frequently Asked Questions)
 
-### processChar(character)
+**Q: Can I use more than 3 EEG channels?**  
+A: Yes, change `numChannels` in the source code. Ensure BLE packet size does not exceed 244 bytes.
 
-Process one char at a time from serial port. This is the main command processor for the OpenBCI system. Considered mission critical for normal operation.
+**Q: Can I modify the BLE names/UUIDs?**  
+A: Yes, but both buds must use different UUIDs. Update the UUIDs in your GUI/client as well.
 
-**_character_** {char}
+**Q: Can these buds stream to a mobile app?**  
+A: Yes, use a BLE NUS-compatible app and configure UUIDs as above.
 
-The character to process.
+**Q: What is the default baud rate for serial?**  
+A: Both Serial and Serial1 use 115200 baud.
 
-**_Returns_** {boolean}
+**Q: How do I know streaming is active?**  
+A: Check for serial debug prints and BLE notifications. The `isStreaming` flag in the code is set to `true`.
 
-`true` if the command was recognized, `false` if not.
-
-### getCharSerial0()
-
-If `hasDataSerial0()` is `true` then this function is called. Reads from `Serial0` first and foremost, which comes from the RFduino. If no data is available then returns a `0x00` which is NOT a command that the system will recognize as a safe guard.
-
-**_Returns_** {char}
-
-The character from the serial port.
-
-### getCharSerial1()
-
-If `hasDataSerial1()` is `true` then this function is called. Reads from `Serial1` which comes from the external serial port. If no data is available then returns a `0x00` which is NOT a command that the system will recognize as a safe guard.
-
-**_Returns_** {char}
-
-The character from the serial port.
-
-### sendChannelData()
-
-Writes channel data, aux data, and footer to serial port or over wifi. Based on global variables `useAux` and `useAccel` Must keep for portability.
-
-If `curAccelMode` is ACCEL_MODE_OFF then  then sends data from `auxData` array and sets the contents of `auxData` to `0` after send. `board.useAccel(false)`
-If `curAccelMode` is ACCEL_MODE_ON then  then sends data from `axisData` array and sets the contents of `axisData` to `0` after send. `board.useAccel(true)`
-
-### updateChannelData()
-
-Called when the board ADS1299 has new data available. If there is a daisy module attached, that data is also fetched here.
-
-## <a name="enums"></a> ENUMS:
-
-### BOARD_MODE
-
-Board mode changes the hardware pins.
-
-#### BOARD_MODE_DEFAULT
-
-`0` - Board will operate leave all pins in default mode.
-
-#### BOARD_MODE_DEBUG
-
-`1` - Board will output serial debug data out of the external serial port.
-
-#### BOARD_MODE_ANALOG
-
-`2` - Board will read from `A6` (`D11`), `A7` (`D12`), and `A8` (`D13`). `A8` is only is use when there is no wifi present. The analog to digital converter is 10bits and the data will be in .  
-
-|Pin|Aux Bytes|Notes|
-|----|----|----|
-|`A6`|0:1|`D11`|
-|`A7`|2:3|`D12`|
-|`A8`|4:5|`D13` - If wifi not present|
-
-#### BOARD_MODE_DIGITAL
-
-`3` - Board will read from `D11`, `D12`, `D13` (if wifi not present), `D17`, and `D18` (if wifi not present).
-
-|Pin|Aux Byte|Notes|
-|----|----|----|
-|`D11`|0||
-|`D11`|1||
-|`D13`|2|If wifi not present|
-|`D17`|3||
-|`D18`|4|If wifi not present|
-
-### PACKET_TYPE
-
-#### PACKET_TYPE_ACCEL
-
-`0` - End of standard stream packet.
-
-#### PACKET_TYPE_RAW_AUX
-
-`1` - End of stream packet with raw packet.
-
-#### PACKET_TYPE_USER_DEFINED
-
-`2` - End of stream packet, user defined.
-
-#### PACKET_TYPE_ACCEL_TIME_SET
-
-`3` - End of time sync up with accelerometer stream packet.
-
-#### PACKET_TYPE_ACCEL_TIME_SYNC
-
-`4` - End of time synced stream packet.
-
-#### PACKET_TYPE_RAW_AUX_TIME_SET
-
-`5` - End of time sync up stream packet.
-
-#### PACKET_TYPE_RAW_AUX_TIME_SYNC
-
-`6` - End of time synced stream packet.
-
-### SAMPLE_RATE
-
-#### SAMPLE_RATE_16000
-
-`0` - Sample rate 16000Hz
-
-#### SAMPLE_RATE_8000
-
-`1` - Sample rate 8000Hz
-
-#### SAMPLE_RATE_4000
-
-`2` - Sample rate 4000Hz
-
-#### SAMPLE_RATE_2000
-
-`3` - Sample rate 2000Hz
-
-#### SAMPLE_RATE_1000
-
-`4` - Sample rate 1000Hz
-
-#### SAMPLE_RATE_500
-
-`5` - Sample rate 500Hz
-
-#### SAMPLE_RATE_250
-
-`6` - Sample rate 250Hz
+---
